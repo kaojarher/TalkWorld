@@ -2603,8 +2603,14 @@ async function generateStory() {
   const worldId = document.getElementById('storyWorld').value;
   const genre = document.getElementById('storyGenre').value;
   const prompt = document.getElementById('storyPrompt').value;
-  const lenMap = {short:300, medium:600, long:1000};
-  const len = lenMap[state.storyLen] || 300;
+
+  // 字數目標、段落要求、token 上限三者配合
+  const lenConfig = {
+    short:  { chars: 300,  minPara: 3, maxTokens: 1200 },
+    medium: { chars: 600,  minPara: 5, maxTokens: 2200 },
+    long:   { chars: 1000, minPara: 8, maxTokens: 3600 }
+  };
+  const cfg = lenConfig[state.storyLen] || lenConfig.short;
 
   const p1 = state.characters.find(c=>c.id===p1id);
   const p2 = state.characters.find(c=>c.id===p2id);
@@ -2613,18 +2619,28 @@ async function generateStory() {
   const storyEl = document.getElementById('storyOutput');
   storyEl.innerHTML = '<div class="typing-indicator" style="justify-content:center;padding:20px;"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
 
-  const sysPrompt = `你是一位出色的中文小說作家，擅長寫${genre}風格的故事。請以繁體中文寫作。`;
-  const userPrompt = `請寫一個約${len}字的${genre}故事。
-角色A：${p1 ? `${p1.name}（${p1.role}，個性：${p1.traits.join('、')}，背景：${p1.background}）` : '未選擇'}
-角色B：${p2 ? `${p2.name}（${p2.role}，個性：${p2.traits.join('、')}）` : '未選擇'}
-世界觀：${world ? `${world.name}（${world.type}，${world.mood}）${world.rules ? '，設定：'+world.rules : ''}` : '現代都市'}
+  const sysPrompt = `你是一位出色的繁體中文小說作家，擅長寫${genre}風格的故事。
+寫作要求：
+- 必須使用繁體中文
+- 故事字數必須達到 ${cfg.chars} 字以上，不可提前結束
+- 至少分成 ${cfg.minPara} 個段落，每段 2-4 句
+- 文字優美流暢，情感細膩，有場景描寫、對話與內心獨白
+- 直接開始正文，不加標題、不加「好的」等前綴`;
+
+  const userPrompt = `請寫一個【${cfg.chars}字以上】的${genre}故事，字數不足請繼續寫直到達標。
+
+角色A：${p1 ? `${p1.name}（${p1.role}，個性：${p1.traits.join('、')}，背景：${p1.background || '無'}）` : '未指定'}
+角色B：${p2 ? `${p2.name}（${p2.role}，個性：${p2.traits.join('、')}）` : '未指定'}
+世界觀：${world ? `${world.name}（${world.type}，${world.mood}${world.rules ? '，設定：'+world.rules.slice(0,80) : ''}）` : '現代都市'}
 劇情提示：${prompt || '初次相遇'}
-請直接開始故事，不要加標題，文字優美、情感細膩。`;
+
+請立刻開始正文，段落之間空一行，目標字數 ${cfg.chars} 字以上：`;
 
   try {
-    const data = await callGemini(state.settings.model, [{ role: 'user', parts: [{ text: userPrompt }] }], sysPrompt, 1500);
+    const data = await callGemini(state.settings.model, [{ role: 'user', parts: [{ text: userPrompt }] }], sysPrompt, cfg.maxTokens);
     const story = data.candidates?.[0]?.content?.parts?.[0]?.text || '生成失敗，請重試。';
-    storyEl.innerHTML = story.replace(/\n/g,'<br>');
+    storyEl.innerHTML = story.replace(/\n\n/g,'</p><p style="margin-top:1em">').replace(/\n/g,'<br>');
+    if(!storyEl.innerHTML.startsWith('<p')) storyEl.innerHTML = '<p>' + storyEl.innerHTML + '</p>';
     state.stories.push({ text: story, timestamp: Date.now() });
     saveState();
   } catch(e) {
