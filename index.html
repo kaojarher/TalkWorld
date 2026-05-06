@@ -26,13 +26,13 @@
 ║  8. 🌙 情感感知 — 精準捕捉情感狀態，提供貼切回應                   ║
 ║                                                                  ║
 ║  【技術架構】                                                      ║
-║  - AI 引擎：使用 Gemini(需在設定中輸入 API Key）    ║
+║  - AI 引擎：使用 Anthropic Claude API（需在設定中輸入 API Key）    ║
 ║  - 圖像生成：Canvas 程序化生成角色立繪                             ║
 ║  - 本地儲存：LocalStorage 持久化角色與記憶資料                     ║
 ║  - 框架：純 HTML5 + CSS3 + Vanilla JS（無需安裝）                 ║
 ║                                                                  ║
 ║  【使用方式】                                                      ║
-║  1. 點擊右上角⚙️設定，輸入 Gemini API Key                      ║
+║  1. 點擊右上角⚙️設定，輸入 Anthropic API Key                      ║
 ║  2. 在「角色創建」標籤新增你的 AI 夥伴                             ║
 ║  3. 到「對話」標籤開始聊天                                         ║
 ║  4. 在「群聊」標籤邀請多個角色同時互動                             ║
@@ -968,9 +968,12 @@
 <header>
   <div class="logo">Talk<span>World</span> <span style="font-size:0.7rem;font-style:normal;opacity:0.6;">TalkWorld</span></div>
   <div class="header-actions">
+    <button class="btn-icon" onclick="exportData()" title="匯出資料">📤</button>
+    <button class="btn-icon" onclick="document.getElementById('importFileInput').click()" title="匯入資料">📥</button>
     <button class="btn-icon" onclick="openSettings()" title="設定">⚙️</button>
     <button class="btn-icon" onclick="clearMemory()" title="清除記憶">🧹</button>
   </div>
+  <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importData(event)">
 </header>
 
 <!-- API Key 常駐列 -->
@@ -1065,7 +1068,7 @@
         <div class="form-group">
           <label class="form-label">角色類型</label>
           <select class="form-select" id="charRole" onchange="refreshCharPortraitPrompt()">
-            <option>溫柔體貼的學姐</option>
+            <option>溫柔體貼的學長／學姐</option>
             <option>霸道深情的總裁</option>
             <option>活潑可愛的青梅竹馬</option>
             <option>神秘冷酷的反派</option>
@@ -1262,20 +1265,21 @@
 
       <!-- Col 2: AI World Generator (mirrors character portrait column) -->
       <div class="ai-portrait-col">
-        <div class="ai-portrait-label">✨ AI 世界生成 <span>· Gemini 驅動</span></div>
+        <div class="ai-portrait-label">🌿 AI 世界繪圖 <span>· Pollinations.ai 驅動</span></div>
 
         <!-- World map preview -->
         <div class="world-map-container" style="height:200px;margin:0;">
           <canvas id="worldCanvas"></canvas>
         </div>
 
-        <!-- AI generated description preview -->
-        <div id="worldAiPreview" style="
-          background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);
-          padding:10px 12px;font-size:0.78rem;color:var(--text2);line-height:1.7;
-          min-height:60px;max-height:160px;overflow-y:auto;
-          display:flex;align-items:center;justify-content:center;color:var(--text3);
-        ">輸入世界名稱後點擊「AI 建立世界」</div>
+        <!-- AI generated world image -->
+        <div id="worldImgWrapper" style="position:relative;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;">
+          <div id="worldImgPlaceholder" style="color:var(--text3);font-size:0.8rem;text-align:center;padding:16px;">
+            <div style="font-size:2rem;margin-bottom:6px;">🌍</div>輸入世界名稱後點擊生成
+          </div>
+          <img id="worldAiImg" style="display:none;width:100%;height:100%;object-fit:cover;" alt="世界圖">
+        </div>
+        <button id="worldImgSaveBtn" style="display:none;" class="btn-secondary" onclick="saveWorldImg()" style="font-size:0.78rem;padding:5px 10px;">💾 保存圖片</button>
 
         <!-- Loading bar (same as char portrait) -->
         <div id="worldAiLoading" style="display:none;flex-direction:column;align-items:center;gap:8px;padding:4px 0;">
@@ -1286,17 +1290,17 @@
           </div>
         </div>
 
-        <button class="btn-primary" id="worldAiBtn" onclick="aiGenerateWorld()" style="width:100%;justify-content:center;font-size:0.85rem;padding:9px;">
-          ✨ AI 建立世界
+        <button class="btn-primary" id="worldAiBtn" onclick="aiGenerateWorldImage()" style="width:100%;justify-content:center;font-size:0.85rem;padding:9px;">
+          🌿 AI 生成世界圖
         </button>
-        <div style="font-size:0.72rem;color:var(--text3);text-align:center;">AI 將自動填入世界規則與重要地點</div>
+        <div style="font-size:0.72rem;color:var(--text3);text-align:center;">AI 將依世界名稱與類型生成專屬風景圖</div>
       </div>
 
     </div>
 
     <div>
       <div style="font-size:0.85rem;color:var(--text3);margin-bottom:12px;">已建立的世界</div>
-      <div id="worldList" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
+      <div id="worldList" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
     </div>
   </div>
 
@@ -2328,95 +2332,135 @@ function renderGroupMessages() {
 // ================== WORLD BUILDING ==================
 
 function onWorldInputChange() {
-  // Reset preview hint when user edits fields
-  const preview = document.getElementById('worldAiPreview');
-  if(preview && preview.dataset.aiGenerated !== 'true') {
-    const name = document.getElementById('worldName')?.value?.trim();
-    if(name) preview.textContent = `準備為「${name}」生成世界設定…`;
-    else preview.textContent = '輸入世界名稱後點擊「AI 建立世界」';
+  // Reset placeholder when user types
+  const name = document.getElementById('worldName')?.value?.trim();
+  const ph = document.getElementById('worldImgPlaceholder');
+  if(ph && document.getElementById('worldAiImg').style.display === 'none') {
+    ph.innerHTML = name
+      ? `<div style="font-size:2rem;margin-bottom:6px;">🌍</div>準備為「${name}」生成世界圖…`
+      : '<div style="font-size:2rem;margin-bottom:6px;">🌍</div>輸入世界名稱後點擊生成';
   }
 }
 
-async function aiGenerateWorld() {
+// Convert a loaded <img> to base64 via canvas
+function imgToBase64(imgEl) {
+  try {
+    const c = document.createElement('canvas');
+    c.width = imgEl.naturalWidth || 800;
+    c.height = imgEl.naturalHeight || 450;
+    c.getContext('2d').drawImage(imgEl, 0, 0);
+    return c.toDataURL('image/jpeg', 0.82);
+  } catch(e) { return imgEl.src; }
+}
+
+let worldImgLastUrl = '';
+
+async function aiGenerateWorldImage() {
   const name = document.getElementById('worldName')?.value?.trim();
   if(!name) { showToast('請先輸入世界名稱'); return; }
-  const key = getApiKey();
-  if(!key) { showToast('請先輸入 Gemini API Key'); return; }
 
   const type = document.getElementById('worldType')?.value || 'fantasy';
   const mood = document.getElementById('worldMood')?.value || '浪漫甜蜜';
-  const typeNames = {fantasy:'奇幻世界',modern:'現代都市',scifi:'科幻未來',historical:'古代歷史',horror:'恐怖異界',school:'校園'};
-  const typeName = typeNames[type] || type;
 
-  const btn = document.getElementById('worldAiBtn');
+  const typePromptMap = {
+    fantasy:    'epic fantasy landscape, magical floating islands, ancient ruins, glowing forests',
+    modern:     'modern city skyline at night, neon lights, rain reflections, urban atmosphere',
+    scifi:      'futuristic sci-fi city, space station, holographic displays, cyberpunk neon',
+    historical: 'ancient historical landscape, traditional architecture, cherry blossoms, misty mountains',
+    horror:     'dark gothic horror landscape, haunted castle, blood moon, twisted dead trees, fog',
+    school:     'beautiful school campus, cherry blossom trees, sunny courtyard, stained glass windows'
+  };
+  const moodPromptMap = {
+    '浪漫甜蜜': 'romantic soft pink golden hour, gentle breeze, warm pastel colors',
+    '黑暗神秘': 'dark mysterious atmosphere, deep shadows, moonlight, eerie fog',
+    '輕鬆日常': 'peaceful bright daytime, clear sky, soft sunlight, cozy warm atmosphere',
+    '史詩冒險': 'epic dramatic cinematic, storm clouds, epic scale, adventurous',
+    '哀愁唯美': 'melancholic beautiful, twilight dusk, falling leaves, bittersweet atmosphere'
+  };
+
+  const sceneBase = typePromptMap[type] || typePromptMap.fantasy;
+  const moodDesc  = moodPromptMap[mood]  || moodPromptMap['浪漫甜蜜'];
+  const prompt = `${name}, ${sceneBase}, ${moodDesc}, Studio Ghibli art style, Hayao Miyazaki, painterly illustration, highly detailed, cinematic wide shot, masterpiece`;
+
+  const btn    = document.getElementById('worldAiBtn');
   const loading = document.getElementById('worldAiLoading');
-  const preview = document.getElementById('worldAiPreview');
-  const pf = document.getElementById('worldAiProgress');
-  const txtEl = document.getElementById('worldAiLoadingTxt');
+  const ph     = document.getElementById('worldImgPlaceholder');
+  const img    = document.getElementById('worldAiImg');
+  const pf     = document.getElementById('worldAiProgress');
+  const txtEl  = document.getElementById('worldAiLoadingTxt');
+  const saveBtn = document.getElementById('worldImgSaveBtn');
 
   btn.disabled = true;
+  img.style.display = 'none';
+  ph.style.display = 'flex';
+  ph.innerHTML = '<div style="font-size:1.5rem">🌿</div>';
   loading.style.display = 'flex';
-  preview.textContent = '';
-  preview.style.justifyContent = 'center';
-  preview.style.alignItems = 'center';
-  preview.style.color = 'var(--text3)';
   pf.style.width = '0%';
+  saveBtn.style.display = 'none';
 
   let prog = 0;
-  const msgs = ['世界架構建立中…', '魔法系統設計中…', '地點規劃中…', '歷史背景撰寫中…'];
+  const msgs = ['世界風景繪製中…', '天空與地形渲染…', '吉卜力魔法施放中…', '細節潤飾中…'];
   const tick = setInterval(() => {
-    prog = Math.min(prog + (prog < 60 ? 2 : 0.8), 93);
+    prog = Math.min(prog + (prog < 65 ? 1.2 : 0.4), 93);
     pf.style.width = prog + '%';
     txtEl.textContent = msgs[Math.floor(prog / 25) % msgs.length];
-  }, 200);
+  }, 220);
 
-  const prompt = `你是一位富有創意的世界觀設計師。請為以下虛構世界建立詳細設定，以繁體中文回應。
+  const seed = name.split('').reduce((a,c) => a + c.charCodeAt(0), 0) % 99999;
+  const url  = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=450&seed=${seed}&model=flux&enhance=true&nologo=true`;
 
-世界名稱：${name}
-世界類型：${typeName}
-世界氛圍：${mood}
+  const timeout = setTimeout(() => {
+    img.onload = null; img.onerror = null;
+    clearInterval(tick);
+    loading.style.display = 'none';
+    ph.innerHTML = '<div style="font-size:1.5rem">⚠️</div><div>載入逾時，請重試</div>';
+    showToast('⚠️ 世界圖載入逾時');
+    btn.disabled = false;
+  }, 65000);
 
-請用以下格式回應（JSON）：
-{
-  "rules": "詳細描述這個世界的規則、特色設定（如魔法系統、科技水平、社會結構、特殊法則等），100-150字",
-  "locations": "列出5-8個重要地點名稱，以頓號分隔",
-  "description": "用詩意的方式描述這個世界的整體氛圍，2-3句話"
-}
-
-只回傳 JSON，不要其他文字。`;
-
-  try {
-    const data = await callGemini(state.settings.model, [{role:'user', parts:[{text:prompt}]}], null, 600);
-    const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const clean = raw.replace(/```json|```/g, '').trim();
-    let parsed;
-    try { parsed = JSON.parse(clean); } catch(e) { throw new Error('AI 回傳格式錯誤，請重試'); }
-
+  img.onload = () => {
+    clearTimeout(timeout);
     clearInterval(tick);
     pf.style.width = '100%';
-    await new Promise(r => setTimeout(r, 200));
-    loading.style.display = 'none';
+    setTimeout(() => {
+      loading.style.display = 'none';
+      ph.style.display = 'none';
+      img.style.display = 'block';
+      worldImgLastUrl = url;
+      saveBtn.style.display = '';
+      showToast(`🌍「${name}」世界圖生成完成！`);
+      generateWorldMap();
+    }, 200);
+    btn.disabled = false;
+  };
 
-    // Fill in the form fields
-    if(parsed.rules) document.getElementById('worldRules').value = parsed.rules;
-    if(parsed.locations) document.getElementById('worldLocations').value = parsed.locations;
-
-    // Show description in preview
-    preview.dataset.aiGenerated = 'true';
-    preview.style.justifyContent = 'flex-start';
-    preview.style.alignItems = 'flex-start';
-    preview.style.color = 'var(--text2)';
-    preview.innerHTML = `<div><div style="font-size:0.7rem;color:var(--accent);margin-bottom:6px;letter-spacing:0.05em;">✨ AI 世界描述</div>${parsed.description || ''}</div>`;
-
-    showToast(`🌍「${name}」世界設定已生成！`);
-    generateWorldMap();
-  } catch(err) {
+  img.onerror = () => {
+    clearTimeout(timeout);
     clearInterval(tick);
     loading.style.display = 'none';
-    preview.textContent = '生成失敗，請重試';
-    showToast('⚠️ ' + (err.message || '生成失敗'));
+    ph.innerHTML = '<div style="font-size:1.5rem">⚠️</div><div>圖片載入失敗，請重試</div>';
+    showToast('⚠️ 世界圖載入失敗');
+    btn.disabled = false;
+  };
+
+  img.src = url;
+}
+
+function saveWorldImg() {
+  const img = document.getElementById('worldAiImg');
+  if(!img || img.style.display === 'none') { showToast('請先生成世界圖'); return; }
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img, 0, 0);
+    const a = document.createElement('a');
+    a.download = `miraimind_world_${Date.now()}.jpg`;
+    a.href = c.toDataURL('image/jpeg', 0.9);
+    a.click();
+    showToast('💾 世界圖已保存！');
+  } catch(e) {
+    if(worldImgLastUrl) { window.open(worldImgLastUrl, '_blank'); showToast('圖片已在新分頁開啟，請右鍵保存'); }
   }
-  btn.disabled = false;
 }
 
 function generateWorldMap() {
@@ -2487,13 +2531,30 @@ function generateWorldMap() {
 function saveWorld() {
   const name = document.getElementById('worldName').value.trim();
   if(!name) { showToast('請輸入世界名稱'); return; }
+
+  // Capture world AI image as base64 if available
+  let worldImgBase64 = '';
+  const worldImg = document.getElementById('worldAiImg');
+  if(worldImg && worldImg.style.display !== 'none' && worldImg.src) {
+    try {
+      const c = document.createElement('canvas');
+      c.width = worldImg.naturalWidth || 800;
+      c.height = worldImg.naturalHeight || 450;
+      c.getContext('2d').drawImage(worldImg, 0, 0);
+      worldImgBase64 = c.toDataURL('image/jpeg', 0.80);
+    } catch(e) {
+      worldImgBase64 = worldImg.src.startsWith('data:') ? worldImg.src : '';
+    }
+  }
+
   const world = {
     id: Date.now().toString(),
     name,
     type: document.getElementById('worldType').value,
     mood: document.getElementById('worldMood').value,
     rules: document.getElementById('worldRules').value,
-    locations: document.getElementById('worldLocations').value
+    locations: document.getElementById('worldLocations').value,
+    imgBase64: worldImgBase64
   };
   state.worlds.push(world);
   saveState();
@@ -2508,10 +2569,18 @@ function renderWorldList() {
   el.innerHTML = '';
   state.worlds.forEach(w => {
     const div = document.createElement('div');
-    div.style.cssText = 'background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;';
-    div.innerHTML = `<span style="font-size:1.2rem;">🌍</span>
-      <div><div style="font-weight:500;">${w.name}</div><div style="font-size:0.75rem;color:var(--text3);">${w.type} · ${w.mood}</div></div>
-      <button style="margin-left:auto;" class="avatar-ctrl-btn" onclick="deleteWorld('${w.id}');event.stopPropagation();">🗑️</button>`;
+    div.style.cssText = 'background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;width:160px;cursor:pointer;';
+    const thumbHTML = w.imgBase64
+      ? `<img src="${w.imgBase64}" style="width:100%;height:80px;object-fit:cover;" alt="${w.name}">`
+      : `<div style="width:100%;height:80px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:1.8rem;">🌍</div>`;
+    div.innerHTML = `${thumbHTML}
+      <div style="padding:8px 10px;display:flex;align-items:center;gap:6px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:500;font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.name}</div>
+          <div style="font-size:0.72rem;color:var(--text3);">${w.type} · ${w.mood}</div>
+        </div>
+        <button class="avatar-ctrl-btn" style="flex-shrink:0;" onclick="deleteWorld('${w.id}');event.stopPropagation();">🗑️</button>
+      </div>`;
     el.appendChild(div);
   });
 }
@@ -2586,6 +2655,137 @@ function saveStory() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `miraimind_story_${Date.now()}.txt`; a.click();
   showToast('📖 故事已保存！');
+}
+
+// ================== IMPORT / EXPORT ==================
+
+async function exportData() {
+  showToast('📦 準備匯出資料，圖片轉檔中…');
+
+  // Deep clone state, then ensure all images are base64
+  const exportState = JSON.parse(JSON.stringify(state));
+
+  // Convert character aiPortraitUrl (may be a remote URL) to base64
+  for(const char of exportState.characters) {
+    if(char.aiPortraitUrl && char.aiPortraitUrl.startsWith('http')) {
+      try {
+        const b64 = await fetchImageAsBase64(char.aiPortraitUrl);
+        if(b64) char.aiPortraitUrl = b64;
+      } catch(e) { /* keep original url if conversion fails */ }
+    }
+  }
+
+  // World images are already base64 from saveWorld(), no extra conversion needed
+
+  const payload = {
+    version: 'miraimind-v5',
+    exportedAt: new Date().toISOString(),
+    data: exportState
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `miraimind_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  showToast('✅ 資料匯出完成！');
+}
+
+// Fetch a remote image and return as base64 data URL
+function fetchImageAsBase64(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0);
+        resolve(c.toDataURL('image/jpeg', 0.82));
+      } catch(e) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    // Timeout after 10s
+    setTimeout(() => resolve(null), 10000);
+    img.src = url;
+  });
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const json = JSON.parse(e.target.result);
+
+      // Support both raw state and wrapped { version, data } format
+      const imported = json.data || json;
+
+      if(!imported.characters && !imported.worlds) {
+        showToast('⚠️ 無效的 MiraiMind 備份檔案');
+        return;
+      }
+
+      // Confirm before overwriting
+      const charCount = (imported.characters || []).length;
+      const worldCount = (imported.worlds || []).length;
+      if(!confirm(`即將匯入：\n• ${charCount} 位角色\n• ${worldCount} 個世界觀\n\n這將覆蓋目前所有資料，確定繼續？`)) return;
+
+      // Merge settings but preserve current API key
+      const currentApiKey = state.settings?.apiKey || '';
+      state = {
+        ...state,
+        ...imported,
+        settings: {
+          ...state.settings,
+          ...imported.settings,
+          apiKey: currentApiKey  // always keep current key
+        }
+      };
+
+      // Ensure settings defaults
+      if(!state.settings.model) state.settings.model = 'gemini-2.5-flash';
+      if(!state.settings.memDepth) state.settings.memDepth = 8;
+
+      saveState();
+
+      // Re-render everything
+      renderCharacters();
+      renderCharList();
+      updateSelects();
+      renderWorldList();
+      renderGroupMessages();
+
+      if(state.activeCharId) {
+        const char = state.characters.find(c => c.id === state.activeCharId);
+        if(char) {
+          document.getElementById('chatCharName').textContent = char.name;
+          if(char.aiPortraitUrl) {
+            const hdr = document.getElementById('chatCharAvatar');
+            let imgEl = hdr?.querySelector('img.ai-portrait-hdr');
+            if(!imgEl && hdr) { imgEl = document.createElement('img'); imgEl.className='ai-portrait-hdr'; imgEl.style.cssText='width:48px;height:48px;object-fit:cover;object-position:top;border-radius:50%;'; hdr.insertBefore(imgEl, hdr.firstChild); }
+            if(imgEl) imgEl.src = char.aiPortraitUrl;
+            const cv = document.getElementById('headerAvatarCanvas'); if(cv) cv.style.display='none';
+          } else {
+            const cv = document.getElementById('headerAvatarCanvas');
+            if(cv) { cv.style.display=''; drawAvatar(cv, char.avatarProps||{}, 48); }
+          }
+          renderMessages(state.activeCharId);
+          renderMemory(state.activeCharId);
+        }
+      }
+
+      showToast(`✅ 匯入完成：${charCount} 位角色、${worldCount} 個世界觀`);
+    } catch(err) {
+      console.error(err);
+      showToast('⚠️ 匯入失敗：' + err.message);
+    }
+    // Reset input so same file can be re-imported
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 // ================== SETTINGS ==================
